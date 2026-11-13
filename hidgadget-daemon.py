@@ -238,24 +238,30 @@ class HIDDaemon:
         print(f"Setting up HID gadget '{GADGET_NAME}' on UDC '{self.udc_name}'...")
 
         os.makedirs(GADGET_PATH, exist_ok=True)
-        with open(os.path.join(GADGET_PATH, "idVendor"), "w") as f: f.write("0x1d6b\n")
-        with open(os.path.join(GADGET_PATH, "idProduct"), "w") as f: f.write("0x0104\n")
+        # Android-compatible VID/PID: pid.codes open-source HID (NOT 0x1d6b:0x0104 which Android flags)
+        with open(os.path.join(GADGET_PATH, "idVendor"), "w") as f: f.write("0x1209\n")
+        with open(os.path.join(GADGET_PATH, "idProduct"), "w") as f: f.write("0x0001\n")
         with open(os.path.join(GADGET_PATH, "bcdDevice"), "w") as f: f.write("0x0100\n")
         with open(os.path.join(GADGET_PATH, "bcdUSB"), "w") as f: f.write("0x0200\n")
+        # Device class at interface level (critical for Android compatibility)
+        with open(os.path.join(GADGET_PATH, "bDeviceClass"), "w") as f: f.write("0x00\n")
+        with open(os.path.join(GADGET_PATH, "bDeviceSubClass"), "w") as f: f.write("0x00\n")
+        with open(os.path.join(GADGET_PATH, "bDeviceProtocol"), "w") as f: f.write("0x00\n")
 
         s_dir = os.path.join(GADGET_PATH, "strings", "0x409")
         os.makedirs(s_dir, exist_ok=True)
         with open(os.path.join(s_dir, "serialnumber"), "w") as f: f.write("A5_HID_01\n")
-        with open(os.path.join(s_dir, "manufacturer"), "w") as f: f.write("Samsung\n")
-        with open(os.path.join(s_dir, "product"), "w") as f: f.write("Galaxy A5 HID Device\n")
+        with open(os.path.join(s_dir, "manufacturer"), "w") as f: f.write("HID Device\n")
+        with open(os.path.join(s_dir, "product"), "w") as f: f.write("USB Keyboard and Mouse\n")
 
         c_dir = os.path.join(GADGET_PATH, "configs", "c.1")
         os.makedirs(os.path.join(c_dir, "strings", "0x409"), exist_ok=True)
         with open(os.path.join(c_dir, "strings", "0x409", "configuration"), "w") as f:
-            f.write("Config 1: HID Composite\n")
-        with open(os.path.join(c_dir, "MaxPower"), "w") as f: f.write("250\n")
+            f.write("HID Config\n")
+        # Android hosts may limit bus power; use conservative 100mA
+        with open(os.path.join(c_dir, "MaxPower"), "w") as f: f.write("100\n")
 
-        # 1. Keyboard
+        # 1. Keyboard (boot protocol)
         kbd_func = os.path.join(GADGET_PATH, "functions", "hid.kbd")
         os.makedirs(kbd_func, exist_ok=True)
         with open(os.path.join(kbd_func, "protocol"), "w") as f: f.write("1\n")
@@ -263,7 +269,7 @@ class HIDDaemon:
         with open(os.path.join(kbd_func, "report_length"), "w") as f: f.write("8\n")
         with open(os.path.join(kbd_func, "report_desc"), "wb") as f: f.write(KBD_DESC)
 
-        # 2. Mouse
+        # 2. Mouse (boot protocol)
         mouse_func = os.path.join(GADGET_PATH, "functions", "hid.mouse")
         os.makedirs(mouse_func, exist_ok=True)
         with open(os.path.join(mouse_func, "protocol"), "w") as f: f.write("2\n")
@@ -271,16 +277,12 @@ class HIDDaemon:
         with open(os.path.join(mouse_func, "report_length"), "w") as f: f.write("4\n")
         with open(os.path.join(mouse_func, "report_desc"), "wb") as f: f.write(MOUSE_DESC)
 
-        # 3. Touch
-        touch_func = os.path.join(GADGET_PATH, "functions", "hid.touch")
-        os.makedirs(touch_func, exist_ok=True)
-        with open(os.path.join(touch_func, "protocol"), "w") as f: f.write("0\n")
-        with open(os.path.join(touch_func, "subclass"), "w") as f: f.write("0\n")
-        with open(os.path.join(touch_func, "report_length"), "w") as f: f.write("5\n")
-        with open(os.path.join(touch_func, "report_desc"), "wb") as f: f.write(TOUCH_DESC)
+        # NOTE: Touch interface removed for Android compatibility.
+        # Android USB host stack gets confused by digitizer in composite with kbd+mouse.
+        # Touch can be re-enabled later as optional.
 
-        # Link functions
-        for name in ["hid.kbd", "hid.mouse", "hid.touch"]:
+        # Link only kbd + mouse (no touch)
+        for name in ["hid.kbd", "hid.mouse"]:
             target = os.path.join(GADGET_PATH, "functions", name)
             link = os.path.join(c_dir, name)
             if not os.path.exists(link):
@@ -292,10 +294,10 @@ class HIDDaemon:
 
         print("Gadget bound to UDC successfully.")
         # Settle devices
-        time.sleep(0.2)
+        time.sleep(0.3)
         self.dev_kbd = "/dev/hidg0"
         self.dev_mouse = "/dev/hidg1"
-        self.dev_touch = "/dev/hidg2"
+        self.dev_touch = None  # Touch disabled for Android compat
 
     def remove_gadget(self):
         print(f"Removing HID gadget '{GADGET_NAME}'...")
@@ -308,7 +310,7 @@ class HIDDaemon:
         except Exception as e:
             print(f"Error unbinding UDC: {e}")
 
-        # Unlink functions
+        # Unlink functions (kbd + mouse; touch may or may not exist)
         for name in ["hid.kbd", "hid.mouse", "hid.touch"]:
             link = os.path.join(c_dir, name)
             if os.path.islink(link) or os.path.exists(link):
@@ -324,7 +326,7 @@ class HIDDaemon:
             try: os.rmdir(c_dir)
             except Exception: pass
 
-        # Remove functions
+        # Remove functions (kbd + mouse; touch may or may not exist)
         for name in ["hid.kbd", "hid.mouse", "hid.touch"]:
             f_dir = os.path.join(GADGET_PATH, "functions", name)
             if os.path.exists(f_dir):
@@ -414,6 +416,8 @@ class HIDDaemon:
         self.write_hid(self.dev_mouse, report)
 
     def handle_touch(self, x: int, y: int, down: bool):
+        if not self.dev_touch:
+            return  # Touch disabled (Android compat mode)
         self.touch_down = down
         # 5-byte report: [flags, x_lo, x_hi, y_lo, y_hi]
         # flags: bit 0: Tip Switch (1=down), bit 1: In Range (1=in range)
@@ -535,6 +539,42 @@ class HIDDaemon:
         except Exception as e:
             print(f"Error reading evdev: {e}")
 
+    def _is_keyboard_device(self, dev_path: str) -> bool:
+        """Check if an input device is a keyboard (not touchscreen/sensor/accelerometer)."""
+        import fcntl, array
+        try:
+            fd = os.open(dev_path, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                # EVIOCGNAME(256) = 0x80104506 on aarch64
+                buf = array.array('B', [0] * 256)
+                fcntl.ioctl(fd, 0x80004506 | (256 << 16), buf)
+                name = buf.tobytes().split(b'\x00')[0].decode('utf-8', errors='replace').lower()
+                # Skip known non-keyboard devices
+                skip_words = ['touchscreen', 'touch', 'accelero', 'gyro', 'hall',
+                              'vibra', 'motor', 'gpio-keys', 'power', 'volume',
+                              'headset', 'headphone', 'sensor', 'proximity']
+                for w in skip_words:
+                    if w in name:
+                        return False
+                # Check if device has keyboard-like keys (KEY_A=30 through KEY_Z=44)
+                # EVIOCGBIT(EV_KEY, KEY_MAX/8) = test if KEY_A..KEY_Z exist
+                # Simple: check if it has at least keys A-Z range in its capability
+                key_bits = array.array('B', [0] * 96)  # 768 bits = 96 bytes
+                # EVIOCGBIT(EV_KEY=1, 96) = 0x80604521
+                fcntl.ioctl(fd, 0x80004521 | (96 << 16), key_bits)
+                # Check KEY_A(30) through KEY_Z(51) — at least 10 keys should be present
+                kbd_key_count = 0
+                for kc in range(16, 54):  # KEY_Q(16) to KEY_SLASH(53)
+                    byte_idx = kc // 8
+                    bit_idx = kc % 8
+                    if byte_idx < len(key_bits) and (key_bits[byte_idx] & (1 << bit_idx)):
+                        kbd_key_count += 1
+                return kbd_key_count >= 10  # Real keyboard has many letter keys
+            finally:
+                os.close(fd)
+        except Exception:
+            return False
+
     async def evdev_monitor(self):
         loop = asyncio.get_running_loop()
         while self.running:
@@ -542,14 +582,21 @@ class HIDDaemon:
             dev_paths = glob.glob("/dev/input/event*")
             for dev in dev_paths:
                 if dev not in self.evdev_fds:
-                    # Ignore touchscreens, vibrators, hall sensors
-                    # We check /proc/bus/input/devices or device name
+                    if not self._is_keyboard_device(dev):
+                        self.evdev_fds[dev] = -1  # Mark as checked, not a keyboard
+                        continue
                     try:
                         fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
-                        # We register file descriptor for reading
+                        # Grab device exclusively so local system doesn't also process keys
+                        import fcntl
+                        try:
+                            fcntl.ioctl(fd, 0x40044590, 1)  # EVIOCGRAB
+                            print(f"Grabbed input device exclusively: {dev}")
+                        except Exception:
+                            print(f"Could not grab {dev} exclusively, sharing")
                         loop.add_reader(fd, self.on_evdev_data_ready, fd)
                         self.evdev_fds[dev] = fd
-                        print(f"Hooked input device: {dev}")
+                        print(f"Hooked keyboard device: {dev}")
                     except Exception as e:
                         pass
             await asyncio.sleep(2.0)
@@ -590,17 +637,34 @@ class HIDDaemon:
         self._shutdown_done = True
         self.running = False
 
-        # Remove readers and close evdev fds
+        # Remove readers and close evdev fds (ungrab first)
         try:
             loop = asyncio.get_running_loop()
-            for fd in self.evdev_fds.values():
+            for dev, fd in self.evdev_fds.items():
+                if fd < 0:
+                    continue  # Was marked as non-keyboard
                 try:
                     loop.remove_reader(fd)
+                except Exception:
+                    pass
+                try:
+                    import fcntl
+                    fcntl.ioctl(fd, 0x40044590, 0)  # EVIOCGRAB release
+                except Exception:
+                    pass
+                try:
                     os.close(fd)
                 except Exception:
                     pass
         except Exception:
-            for fd in self.evdev_fds.values():
+            for dev, fd in self.evdev_fds.items():
+                if fd < 0:
+                    continue
+                try:
+                    import fcntl
+                    fcntl.ioctl(fd, 0x40044590, 0)
+                except Exception:
+                    pass
                 try: os.close(fd)
                 except Exception: pass
         self.evdev_fds.clear()

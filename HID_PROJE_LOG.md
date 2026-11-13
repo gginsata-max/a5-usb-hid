@@ -249,3 +249,40 @@ Bu komut servisi durdurur, `hid1` gadget'ını söker, tüm kural ve ikili dosya
 
 
 
+
+## 2026-11-13 15:50 - Android Uyumluluk Düzeltmesi
+
+### Yapılan İş
+Android cihazlarda (Xiaomi Mi 11 Lite) "Unknown USB mode" hatası alınıyordu. Sorun analizi:
+1. VID `0x1d6b` / PID `0x0104` = Linux Foundation Multifunction Composite Gadget — MIUI/Android bunu debug cihaz olarak tanıyordu
+2. Touch digitizer (3. HID interface) composite gadget'ı karmaşık yapıyordu
+3. bDeviceClass ayarlanmamıştı (interface-level olmalı)
+4. MaxPower=250 bazı Android host'larda sorun çıkıyordu
+
+### Değişiklikler (hidgadget-daemon.py)
+1. **VID/PID**: `0x1d6b:0x0104` → `0x1209:0x0001` (pid.codes açık kaynak HID)
+2. **bDeviceClass/SubClass/Protocol**: `0x00/0x00/0x00` eklendi (interface-level class tanımı)
+3. **Manufacturer**: "Samsung" → "HID Device"
+4. **Product**: "Galaxy A5 HID Device" → "USB Keyboard and Mouse"
+5. **MaxPower**: 250 → 100 (Android uyumlu)
+6. **Touch fonksiyonu kaldırıldı**: Sadece hid.kbd + hid.mouse (2 interface)
+7. **Evdev filtreleme**: `_is_keyboard_device()` eklendi — dokunmatik ekran, sensör, vibratör cihazlarını atlar, sadece gerçek klavye cihazlarını dinler
+8. **EVIOCGRAB**: Klavye cihazı exclusive grab yapılır (yerel sistem tuşları almaz, direkt HID'e aktarılır)
+9. **Shutdown cleanup**: Grabbed cihazlar release edilir
+
+### Test
+- Komut: `sudo systemctl start hidgadget.service`
+- Çıktı: active, /dev/hidg0 + /dev/hidg1 oluştu
+- Gadget doğrulama:
+  - idVendor: 0x1209 ✓
+  - idProduct: 0x0001 ✓
+  - bDeviceClass: 0x00 ✓
+  - functions: hid.kbd, hid.mouse ✓
+  - MaxPower: 100 ✓
+  - UDC: ci_hdrc.0 ✓
+- Socket ping: `{"ok": true, "status": "active", "host_otg": false}` ✓
+- Komut gönderme (key, mouse, text): Başarılı ✓
+- UDC state: "not attached" (USB kablo bağlı değil — beklenen)
+
+### Sonuç: BAŞARILI (kurulum), Android test bekliyor
+### Sonraki adım: Kullanıcıdan Mi 11 Lite'a USB ile bağlayıp test etmesini iste
