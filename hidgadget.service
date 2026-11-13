@@ -1,0 +1,16 @@
+[Unit]
+Description=USB HID Composite Gadget Service (Keyboard/Mouse/Touchpad)
+After=sys-kernel-config.mount
+Wants=sys-kernel-config.mount
+Conflicts=usb-signaller.service unudhcpd@usb0.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/hidgadget-daemon.py
+Restart=no
+TimeoutStopSec=10
+KillMode=mixed
+ExecStopPost=/bin/sh /usr/local/bin/hidgadget-restore.sh
+
+[Install]
+WantedBy=multi-user.target

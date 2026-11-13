@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=USB HID Kontrol
+GenericName=USB Klavye/Fare/Touchpad
+Comment=Samsung Galaxy A5 cihazınızı bilgisayarınız için USB klavye, fare ve touchpad olarak kullanın
+Exec=/usr/local/bin/hidgadget-gui.py
+Icon=org.nura.hidgadget
+Terminal=false
+Type=Application
+Categories=Utility;HardwareSettings;GTK;
+StartupNotify=true
+X-Purism-FormFactor=WorksetLayout;Mobile;
